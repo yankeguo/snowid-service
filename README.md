@@ -6,8 +6,8 @@ a simple id generation service by snowid
 
 ### Environment Variable
 
-* `PORT`, port to listen
-* `WORKER_ID`, unique worker id, if not set, will guess from hostname (Kubernetes StatefulSet Pod)
+* `PORT`, port to listen, default to `8080`
+* `WORKER_ID`, unique worker id, if not set, will guess from hostname (compatible with Kubernetes StatefulSet)
 
 ### Invocation
 

@@ -53,24 +53,26 @@ func main() {
 		envPort = "8080"
 	}
 
-	var id uint64
+	var workerID uint64
 
 	if envWorkerID := strings.TrimSpace(os.Getenv("WORKER_ID")); envWorkerID != "" {
-		if id, err = strconv.ParseUint(strings.TrimSpace(os.Getenv("WORKER_ID")), 10, 64); err != nil {
+		if workerID, err = strconv.ParseUint(strings.TrimSpace(os.Getenv("WORKER_ID")), 10, 64); err != nil {
 			return
 		}
 	} else {
 		log.Println("missing $WORKER_ID, trying hostname")
-		if id, err = hostnameSequenceID(); err != nil {
+		if workerID, err = hostnameSequenceID(); err != nil {
 			return
 		}
 	}
+
+	log.Println("using worker id:", workerID)
 
 	var idGen snowid.Generator
 
 	if idGen, err = snowid.New(snowid.Options{
 		Epoch: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
-		ID:    id,
+		ID:    workerID,
 	}); err != nil {
 		return
 	}
