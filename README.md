@@ -12,7 +12,11 @@ a simple id generation service by snowid
 ### Invocation
 
 ```
-GET /support/any/path?size=10
+GET /healthz
+
+OK
+----------
+GET /any/other/path?size=10
 
 [
   "380651065730707456",

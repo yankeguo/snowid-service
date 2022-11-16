@@ -78,6 +78,14 @@ func main() {
 	s := &http.Server{
 		Addr: ":" + envPort,
 		Handler: http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+			if req.URL.Path == "/healthz" {
+				buf := []byte("OK")
+				rw.Header().Set("Content-Type", "text/plain")
+				rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))
+				_, _ = rw.Write(buf)
+				return
+			}
+
 			size, _ := strconv.Atoi(req.URL.Query().Get("size"))
 			if size < 1 {
 				size = 1
@@ -93,7 +101,7 @@ func main() {
 			}
 			rw.Header().Set("Content-Type", "application/json")
 			rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))
-			rw.Write(buf)
+			_, _ = rw.Write(buf)
 		}),
 	}
 
@@ -112,6 +120,8 @@ func main() {
 	case sig := <-chSig:
 		log.Println("signal caught:", sig.String())
 	}
+
+	time.Sleep(time.Second * 3)
 
 	err = s.Shutdown(context.Background())
 	<-chErr
