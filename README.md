@@ -34,7 +34,7 @@ GET /any/other/path?size=10
 
 ## Donation
 
-Check https://guoyk.net/donation
+Check https://guoyk.xyz/donation
 
 ## Credits
 
