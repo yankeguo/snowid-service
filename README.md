@@ -6,6 +6,7 @@ a simple id generation service by snowid
 
 ### Environment Variable
 
+* `BIND`, address to bind, default to empty
 * `PORT`, port to listen, default to `8080`
 * `WORKER_ID`, unique worker id, if not set, will guess from hostname (compatible with Kubernetes StatefulSet)
 

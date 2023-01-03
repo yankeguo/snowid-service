@@ -29,11 +29,15 @@ func main() {
 	}()
 
 	type Options struct {
+		Bind     string
 		Port     string
 		WorkerID string
 	}
 
 	var opts Options
+
+	// detect bind
+	opts.Bind = strings.TrimSpace(os.Getenv("BIND"))
 
 	// detect port
 	if opts.Port = strings.TrimSpace(os.Getenv("PORT")); opts.Port == "" {
@@ -96,7 +100,7 @@ func main() {
 
 	// create server
 	s := &http.Server{
-		Addr:    ":" + opts.Port,
+		Addr:    opts.Bind + ":" + opts.Port,
 		Handler: m,
 	}
 
