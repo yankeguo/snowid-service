@@ -74,25 +74,35 @@ func main() {
 	m := &http.ServeMux{}
 
 	m.HandleFunc("/healthz", func(rw http.ResponseWriter, req *http.Request) {
+		rw.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		rw.Header().Set("Content-Type", "text/plain")
 		rw.Header().Set("Content-Length", strconv.Itoa(len(OK)))
 		_, _ = rw.Write(OK)
 	})
 
 	m.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
-		size, _ := strconv.Atoi(req.URL.Query().Get("size"))
-		if size < 1 {
+		rw.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+		var size int
+		if size, _ = strconv.Atoi(req.URL.Query().Get("size")); size < 1 {
 			size = 1
 		}
+
 		var response []string
 		for i := 0; i < size; i++ {
 			response = append(response, strconv.FormatUint(idGen.NewID(), 10))
 		}
-		buf, err := json.Marshal(response)
-		if err != nil {
+
+		var (
+			err error
+			buf []byte
+		)
+
+		if buf, err = json.Marshal(response); err != nil {
 			http.Error(rw, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+
 		rw.Header().Set("Content-Type", "application/json")
 		rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 		_, _ = rw.Write(buf)
