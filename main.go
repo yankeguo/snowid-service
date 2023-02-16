@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/guoyk93/snowid"
+	"github.com/guoyk93/summer"
 	"log"
 	"net/http"
 	"os"
@@ -70,48 +70,33 @@ func main() {
 		return
 	}
 
-	// create mux
-	m := &http.ServeMux{}
+	a := summer.Basic(
+		summer.WithLivenessPath("/healthz"),
+		summer.WithReadinessPath("/healthz"),
+		summer.WithMetricsPath("/metrics"),
+	)
 
-	m.HandleFunc("/healthz", func(rw http.ResponseWriter, req *http.Request) {
-		rw.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		rw.Header().Set("Content-Type", "text/plain")
-		rw.Header().Set("Content-Length", strconv.Itoa(len(OK)))
-		_, _ = rw.Write(OK)
-	})
+	a.HandleFunc("/", func(ctx summer.Context) {
+		args := summer.Bind[struct {
+			Size int `json:"size,string"`
+		}](ctx)
 
-	m.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
-		rw.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-
-		var size int
-		if size, _ = strconv.Atoi(req.URL.Query().Get("size")); size < 1 {
-			size = 1
+		if args.Size < 1 {
+			args.Size = 1
 		}
 
 		var response []string
-		for i := 0; i < size; i++ {
+		for i := 0; i < args.Size; i++ {
 			response = append(response, strconv.FormatUint(idGen.NewID(), 10))
 		}
 
-		var (
-			err error
-			buf []byte
-		)
-
-		if buf, err = json.Marshal(response); err != nil {
-			http.Error(rw, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-
-		rw.Header().Set("Content-Type", "application/json")
-		rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))
-		_, _ = rw.Write(buf)
+		ctx.JSON(response)
 	})
 
 	// create server
 	s := &http.Server{
 		Addr:    opts.Bind + ":" + opts.Port,
-		Handler: m,
+		Handler: a,
 	}
 
 	log.Println("listening at:", s.Addr)

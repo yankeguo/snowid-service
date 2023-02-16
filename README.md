@@ -17,6 +17,10 @@ GET /healthz
 
 OK
 ----------
+GET /metrics
+
+...Prometheus Metrics...
+----------
 GET /any/other/path?size=10
 
 [
