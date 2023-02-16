@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/guoyk93/snowid v1.0.0
-	github.com/guoyk93/summer v1.0.3
+	github.com/guoyk93/summer v1.0.5
 )
 
 require (

@@ -24,7 +24,7 @@ github.com/guoyk93/rg
 # github.com/guoyk93/snowid v1.0.0
 ## explicit; go 1.18
 github.com/guoyk93/snowid
-# github.com/guoyk93/summer v1.0.3
+# github.com/guoyk93/summer v1.0.5
 ## explicit; go 1.19
 github.com/guoyk93/summer
 # github.com/matttproud/golang_protobuf_extensions v1.0.1

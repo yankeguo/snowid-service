@@ -1,7 +1,6 @@
 package summer
 
 import (
-	"context"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"net/http"
@@ -10,20 +9,16 @@ import (
 	"sync/atomic"
 )
 
-// CheckerFunc health check function, see [App.Check]
-type CheckerFunc func(ctx context.Context) (err error)
-
 // HandlerFunc handler func with [Context] as argument
 type HandlerFunc[T Context] func(ctx T)
 
 // App the main interface of [summer]
 type App[T Context] interface {
+	// Handler inherit [http.Handler]
 	http.Handler
 
-	// CheckFunc register a checker function with given name
-	//
-	// Invoking '/debug/ready' will evaluate all registered checker functions
-	CheckFunc(name string, fn CheckerFunc)
+	// Registry inherit [Registry]
+	Registry
 
 	// HandleFunc register an action function with given path pattern
 	//
@@ -32,48 +27,21 @@ type App[T Context] interface {
 }
 
 type app[T Context] struct {
-	contextFactory ContextFactory[T]
+	// before-init
+	Registry
 
+	cf   ContextFactory[T]
 	opts options
-
-	checkers map[string]CheckerFunc
 
 	mux *http.ServeMux
 
-	h  http.Handler
-	ph http.Handler
-
-	pprof http.Handler
+	hMain http.Handler
+	hProm http.Handler
+	hProf http.Handler
 
 	cc chan struct{}
 
 	readinessFailed int64
-}
-
-func (a *app[T]) CheckFunc(name string, fn CheckerFunc) {
-	a.checkers[name] = fn
-}
-
-func (a *app[T]) executeCheckers(ctx context.Context) (r string, failed bool) {
-	sb := &strings.Builder{}
-	for k, fn := range a.checkers {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(k)
-		sb.WriteString(": ")
-		if err := fn(ctx); err == nil {
-			sb.WriteString("OK")
-		} else {
-			failed = true
-			sb.WriteString(err.Error())
-		}
-	}
-	r = sb.String()
-	if r == "" {
-		r = "OK"
-	}
-	return
 }
 
 func (a *app[T]) HandleFunc(pattern string, fn HandlerFunc[T]) {
@@ -82,7 +50,7 @@ func (a *app[T]) HandleFunc(pattern string, fn HandlerFunc[T]) {
 		otelhttp.WithRouteTag(
 			pattern,
 			http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-				c := a.contextFactory(rw, req)
+				c := a.cf(rw, req)
 				func() {
 					defer c.Perform()
 					fn(c)
@@ -92,42 +60,28 @@ func (a *app[T]) HandleFunc(pattern string, fn HandlerFunc[T]) {
 	)
 }
 
-func (a *app[T]) initialize() {
-	// checkers
-	a.checkers = map[string]CheckerFunc{}
-
-	// promhttp handler
-	a.ph = promhttp.Handler()
-
-	// pprof handler
-	{
-		m := &http.ServeMux{}
-		m.HandleFunc("/debug/pprof/", pprof.Index)
-		m.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		m.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		m.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		m.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		a.pprof = m
-	}
-
-	// handler
-	a.mux = &http.ServeMux{}
-	a.h = otelhttp.NewHandler(a.mux, "http")
-
-	// concurrency control
-	if a.opts.concurrency > 0 {
-		a.cc = make(chan struct{}, a.opts.concurrency)
-		for i := 0; i < a.opts.concurrency; i++ {
-			a.cc <- struct{}{}
-		}
-	}
-}
-
 func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// alive, ready, metrics
 	if req.URL.Path == a.opts.readinessPath {
 		// readiness first, works when readinessPath == livenessPath
-		r, failed := a.executeCheckers(req.Context())
+		sb := &strings.Builder{}
+		var failed bool
+		a.Check(req.Context(), func(name string, err error) {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(name)
+			if err == nil {
+				sb.WriteString(": OK")
+			} else {
+				failed = true
+				sb.WriteString(": ")
+				sb.WriteString(err.Error())
+			}
+		})
+		if sb.Len() == 0 {
+			sb.WriteString("OK")
+		}
 		status := http.StatusOK
 		if failed {
 			atomic.AddInt64(&a.readinessFailed, 1)
@@ -135,7 +89,7 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		} else {
 			atomic.StoreInt64(&a.readinessFailed, 0)
 		}
-		respondInternal(rw, r, status)
+		respondInternal(rw, sb.String(), status)
 		return
 	} else if req.URL.Path == a.opts.livenessPath {
 		if a.opts.readinessCascade > 0 && atomic.LoadInt64(&a.readinessFailed) > a.opts.readinessCascade {
@@ -145,13 +99,13 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 		return
 	} else if req.URL.Path == a.opts.metricsPath {
-		a.ph.ServeHTTP(rw, req)
+		a.hProm.ServeHTTP(rw, req)
 		return
 	}
 
 	// pprof
 	if strings.HasPrefix(req.URL.Path, "/debug/") {
-		a.pprof.ServeHTTP(rw, req)
+		a.hProf.ServeHTTP(rw, req)
 		return
 	}
 
@@ -163,13 +117,12 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}()
 	}
 
-	a.h.ServeHTTP(rw, req)
+	a.hMain.ServeHTTP(rw, req)
 }
 
 // New create an [App] with a custom [ContextFactory] and additional [Option]
 func New[T Context](cf ContextFactory[T], opts ...Option) App[T] {
 	a := &app[T]{
-		contextFactory: cf,
 
 		opts: options{
 			concurrency:      128,
@@ -179,10 +132,36 @@ func New[T Context](cf ContextFactory[T], opts ...Option) App[T] {
 			metricsPath:      DefaultMetricsPath,
 		},
 	}
+
 	for _, opt := range opts {
 		opt(&a.opts)
 	}
-	a.initialize()
+
+	a.Registry = NewRegistry()
+
+	a.cf = cf
+
+	a.mux = &http.ServeMux{}
+
+	a.hMain = otelhttp.NewHandler(a.mux, "http")
+	a.hProm = promhttp.Handler()
+	{
+		m := &http.ServeMux{}
+		m.HandleFunc("/debug/pprof/", pprof.Index)
+		m.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		m.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		m.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		m.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		a.hProf = m
+	}
+
+	// concurrency control
+	if a.opts.concurrency > 0 {
+		a.cc = make(chan struct{}, a.opts.concurrency)
+		for i := 0; i < a.opts.concurrency; i++ {
+			a.cc <- struct{}{}
+		}
+	}
 	return a
 }
 

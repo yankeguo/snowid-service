@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-var (
-	OK = []byte("OK")
-)
-
 func main() {
 	var err error
 	defer func() {
