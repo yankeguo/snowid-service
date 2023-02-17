@@ -1,4 +1,4 @@
-package summer
+package winter
 
 import (
 	"errors"
@@ -129,8 +129,8 @@ func StatusCodeFromError(err error) int {
 	return http.StatusInternalServerError
 }
 
-// BodyFromError extract extras from previous created [HaltError]
-func BodyFromError(err error) (m map[string]any) {
+// JSONBodyFromError extract extras from previous created [HaltError]
+func JSONBodyFromError(err error) (m map[string]any) {
 	for {
 		if err == nil {
 			return

@@ -1,4 +1,4 @@
-package summer
+package winter
 
 import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -10,10 +10,10 @@ import (
 )
 
 // HandlerFunc handler func with [Context] as argument
-type HandlerFunc[T Context] func(ctx T)
+type HandlerFunc func(ctx Context)
 
 // App the main interface of [summer]
-type App[T Context] interface {
+type App interface {
 	// Handler inherit [http.Handler]
 	http.Handler
 
@@ -23,14 +23,12 @@ type App[T Context] interface {
 	// HandleFunc register an action function with given path pattern
 	//
 	// This function is similar with [http.ServeMux.HandleFunc]
-	HandleFunc(pattern string, fn HandlerFunc[T])
+	HandleFunc(pattern string, fn HandlerFunc)
 }
 
-type app[T Context] struct {
-	// before-init
+type app struct {
 	Registry
 
-	cf   ContextFactory[T]
 	opts options
 
 	mux *http.ServeMux
@@ -41,26 +39,26 @@ type app[T Context] struct {
 
 	cc chan struct{}
 
-	readinessFailed int64
+	failed int64
 }
 
-func (a *app[T]) HandleFunc(pattern string, fn HandlerFunc[T]) {
+func (a *app) HandleFunc(pattern string, fn HandlerFunc) {
 	a.mux.Handle(
 		pattern,
 		otelhttp.WithRouteTag(
 			pattern,
 			http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-				c := a.cf(rw, req)
+				c := newContext(rw, req)
 				func() {
 					defer c.Perform()
-					fn(c)
+					a.Wrap(fn)(c)
 				}()
 			}),
 		),
 	)
 }
 
-func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+func (a *app) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// alive, ready, metrics
 	if req.URL.Path == a.opts.readinessPath {
 		// readiness first, works when readinessPath == livenessPath
@@ -84,18 +82,18 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 		status := http.StatusOK
 		if failed {
-			atomic.AddInt64(&a.readinessFailed, 1)
+			atomic.AddInt64(&a.failed, 1)
 			status = http.StatusInternalServerError
 		} else {
-			atomic.StoreInt64(&a.readinessFailed, 0)
+			atomic.StoreInt64(&a.failed, 0)
 		}
-		respondInternal(rw, sb.String(), status)
+		internalRespond(rw, sb.String(), status)
 		return
 	} else if req.URL.Path == a.opts.livenessPath {
-		if a.opts.readinessCascade > 0 && atomic.LoadInt64(&a.readinessFailed) > a.opts.readinessCascade {
-			respondInternal(rw, "CASCADED", http.StatusInternalServerError)
+		if a.opts.readinessCascade > 0 && atomic.LoadInt64(&a.failed) > a.opts.readinessCascade {
+			internalRespond(rw, "CASCADED", http.StatusInternalServerError)
 		} else {
-			respondInternal(rw, "OK", http.StatusOK)
+			internalRespond(rw, "OK", http.StatusOK)
 		}
 		return
 	} else if req.URL.Path == a.opts.metricsPath {
@@ -109,7 +107,7 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// concurrency control
+	// concurrency
 	if a.cc != nil {
 		<-a.cc
 		defer func() {
@@ -120,10 +118,9 @@ func (a *app[T]) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	a.hMain.ServeHTTP(rw, req)
 }
 
-// New create an [App] with a custom [ContextFactory] and additional [Option]
-func New[T Context](cf ContextFactory[T], opts ...Option) App[T] {
-	a := &app[T]{
-
+// New create an [App] with [Option]
+func New(opts ...Option) App {
+	a := &app{
 		opts: options{
 			concurrency:      128,
 			readinessCascade: 5,
@@ -132,30 +129,25 @@ func New[T Context](cf ContextFactory[T], opts ...Option) App[T] {
 			metricsPath:      DefaultMetricsPath,
 		},
 	}
-
 	for _, opt := range opts {
 		opt(&a.opts)
 	}
 
 	a.Registry = NewRegistry()
 
-	a.cf = cf
-
 	a.mux = &http.ServeMux{}
 
 	a.hMain = otelhttp.NewHandler(a.mux, "http")
 	a.hProm = promhttp.Handler()
-	{
-		m := &http.ServeMux{}
-		m.HandleFunc("/debug/pprof/", pprof.Index)
-		m.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		m.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		m.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		m.HandleFunc("/debug/pprof/trace", pprof.Trace)
-		a.hProf = m
-	}
+	m := &http.ServeMux{}
+	m.HandleFunc("/debug/pprof/", pprof.Index)
+	m.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	m.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	m.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	m.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	a.hProf = m
 
-	// concurrency control
+	// create concurrency controller
 	if a.opts.concurrency > 0 {
 		a.cc = make(chan struct{}, a.opts.concurrency)
 		for i := 0; i < a.opts.concurrency; i++ {
@@ -163,12 +155,4 @@ func New[T Context](cf ContextFactory[T], opts ...Option) App[T] {
 		}
 	}
 	return a
-}
-
-// BasicApp basic app is an [App] using vanilla [Context]
-type BasicApp = App[Context]
-
-// Basic create an [App] with vanilla [Context] and additional [Option]
-func Basic(opts ...Option) BasicApp {
-	return New(BasicContext, opts...)
 }

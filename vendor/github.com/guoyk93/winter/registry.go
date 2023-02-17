@@ -1,4 +1,4 @@
-package summer
+package winter
 
 import (
 	"context"
@@ -6,26 +6,13 @@ import (
 	"sync"
 )
 
+// MiddlewareFunc middleware function for component
+type MiddlewareFunc func(h HandlerFunc) HandlerFunc
+
 // LifecycleFunc lifecycle function for component
 type LifecycleFunc func(ctx context.Context) (err error)
 
-type Registry interface {
-	// Component register a component
-	//
-	// In order of `startup`, `check` and `shutdown`
-	Component(name string) Registration
-
-	// Startup start all registered components
-	Startup(ctx context.Context) (err error)
-
-	// Check run all checks
-	Check(ctx context.Context, fn func(name string, err error))
-
-	// Shutdown shutdown all registered components
-	Shutdown(ctx context.Context) (err error)
-}
-
-// Registration a registration in [Registry]
+// Registration a component registration in [Registry]
 type Registration interface {
 	// Name returns name of registration
 	Name() string
@@ -38,13 +25,36 @@ type Registration interface {
 
 	// Shutdown set shutdown function
 	Shutdown(fn LifecycleFunc) Registration
+
+	// Middleware set middleware function
+	Middleware(fn MiddlewareFunc) Registration
+}
+
+type Registry interface {
+	// Component register a component
+	//
+	// In order of `startup`, `check` and `shutdown`
+	Component(name string) Registration
+
+	// Startup start all registered components
+	Startup(ctx context.Context) (err error)
+
+	// Shutdown shutdown all registered components
+	Shutdown(ctx context.Context) (err error)
+
+	// Check run all component checks
+	Check(ctx context.Context, fn func(name string, err error))
+
+	// Wrap wrap [HandlerFunc] with all registered component middlewares
+	Wrap(h HandlerFunc) HandlerFunc
 }
 
 type registration struct {
-	name     string
-	startup  LifecycleFunc
-	check    LifecycleFunc
-	shutdown LifecycleFunc
+	name       string
+	startup    LifecycleFunc
+	check      LifecycleFunc
+	shutdown   LifecycleFunc
+	middleware MiddlewareFunc
 }
 
 func (r *registration) Name() string {
@@ -63,6 +73,11 @@ func (r *registration) Check(fn LifecycleFunc) Registration {
 
 func (r *registration) Shutdown(fn LifecycleFunc) Registration {
 	r.shutdown = fn
+	return r
+}
+
+func (r *registration) Middleware(fn MiddlewareFunc) Registration {
+	r.middleware = fn
 	return r
 }
 
@@ -130,6 +145,16 @@ func (a *registry) Check(ctx context.Context, fn func(name string, err error)) {
 	}
 
 	return
+}
+
+func (a *registry) Wrap(h HandlerFunc) HandlerFunc {
+	for _, item := range a.regs {
+		if item.middleware == nil {
+			continue
+		}
+		h = item.middleware(h)
+	}
+	return h
 }
 
 func (a *registry) Shutdown(ctx context.Context) (err error) {

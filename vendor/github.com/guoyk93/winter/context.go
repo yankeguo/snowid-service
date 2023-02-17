@@ -1,4 +1,4 @@
-package summer
+package winter
 
 import (
 	"context"
@@ -30,15 +30,19 @@ func Bind[T any](c Context) (o T) {
 	return
 }
 
-// Context the most basic context of a incoming request and corresponding response
+// Context context of an incoming request and corresponding response writer
 type Context interface {
 	// Context extend the [context.Context] interface by proxying to [http.Request.Context]
 	context.Context
 
+	// Inject inject underlying [context.Context]
+	Inject(fn func(ctx context.Context) context.Context)
+
 	// Req returns the underlying *http.Request
 	Req() *http.Request
-	// Res returns the underlying http.ResponseWriter
-	Res() http.ResponseWriter
+
+	// Header returns the headers of underlying [http.ResponseWriter]
+	Header() http.Header
 
 	// Bind unmarshal the request data into any struct with json tags
 	//
@@ -66,7 +70,7 @@ type Context interface {
 	Perform()
 }
 
-type basicContext struct {
+type winterContext struct {
 	req *http.Request
 	rw  http.ResponseWriter
 
@@ -79,31 +83,39 @@ type basicContext struct {
 	sendOnce *sync.Once
 }
 
-func (c *basicContext) Deadline() (deadline time.Time, ok bool) {
+func (c *winterContext) Deadline() (deadline time.Time, ok bool) {
 	return c.req.Context().Deadline()
 }
 
-func (c *basicContext) Done() <-chan struct{} {
+func (c *winterContext) Done() <-chan struct{} {
 	return c.req.Context().Done()
 }
 
-func (c *basicContext) Err() error {
+func (c *winterContext) Err() error {
 	return c.req.Context().Err()
 }
 
-func (c *basicContext) Value(key any) any {
+func (c *winterContext) Value(key any) any {
 	return c.req.Context().Value(key)
 }
 
-func (c *basicContext) Req() *http.Request {
+func (c *winterContext) Inject(fn func(ctx context.Context) context.Context) {
+	ctx := c.req.Context()
+	neo := fn(ctx)
+	if neo != nil && neo != ctx {
+		c.req = c.req.WithContext(neo)
+	}
+}
+
+func (c *winterContext) Req() *http.Request {
 	return c.req
 }
 
-func (c *basicContext) Res() http.ResponseWriter {
-	return c.rw
+func (c *winterContext) Header() http.Header {
+	return c.rw.Header()
 }
 
-func (c *basicContext) receive() {
+func (c *winterContext) receive() {
 	var m = map[string]any{}
 	if err := extractRequest(m, c.req); err != nil {
 		Halt(err, HaltWithStatusCode(http.StatusBadRequest))
@@ -111,37 +123,37 @@ func (c *basicContext) receive() {
 	c.buf = rg.Must(json.Marshal(m))
 }
 
-func (c *basicContext) send() {
+func (c *winterContext) send() {
 	c.rw.WriteHeader(c.code)
 	_, _ = c.rw.Write(c.body)
 }
 
-func (c *basicContext) Bind(data interface{}) {
+func (c *winterContext) Bind(data interface{}) {
 	c.recvOnce.Do(c.receive)
 	rg.Must0(json.Unmarshal(c.buf, data))
 }
 
-func (c *basicContext) Code(code int) {
+func (c *winterContext) Code(code int) {
 	c.code = code
 }
 
-func (c *basicContext) Body(contentType string, buf []byte) {
+func (c *winterContext) Body(contentType string, buf []byte) {
 	c.rw.Header().Set("Content-Type", contentType)
 	c.rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))
 	c.rw.Header().Set("X-Content-Type-Options", "nosniff")
 	c.body = buf
 }
 
-func (c *basicContext) Text(s string) {
+func (c *winterContext) Text(s string) {
 	c.Body(ContentTypeTextPlainUTF8, []byte(s))
 }
 
-func (c *basicContext) JSON(data interface{}) {
+func (c *winterContext) JSON(data interface{}) {
 	buf := rg.Must(json.Marshal(data))
 	c.Body(ContentTypeApplicationJSONUTF8, buf)
 }
 
-func (c *basicContext) Perform() {
+func (c *winterContext) Perform() {
 	if r := recover(); r != nil {
 		var (
 			e  error
@@ -151,17 +163,13 @@ func (c *basicContext) Perform() {
 			e = fmt.Errorf("panic: %v", r)
 		}
 		c.Code(StatusCodeFromError(e))
-		c.JSON(BodyFromError(e))
+		c.JSON(JSONBodyFromError(e))
 	}
 	c.sendOnce.Do(c.send)
 }
 
-// ContextFactory factory function for creating an extended [Context]
-type ContextFactory[T Context] func(rw http.ResponseWriter, req *http.Request) T
-
-// BasicContext context factory creating a basic [Context] implementation
-func BasicContext(rw http.ResponseWriter, req *http.Request) Context {
-	return &basicContext{
+func newContext(rw http.ResponseWriter, req *http.Request) Context {
+	return &winterContext{
 		req:      req,
 		rw:       rw,
 		code:     http.StatusOK,
@@ -169,7 +177,3 @@ func BasicContext(rw http.ResponseWriter, req *http.Request) Context {
 		sendOnce: &sync.Once{},
 	}
 }
-
-var (
-	_ ContextFactory[Context] = BasicContext
-)

@@ -1,4 +1,4 @@
-package summer
+package winter
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func respondInternal(rw http.ResponseWriter, s string, code int) {
+func internalRespond(rw http.ResponseWriter, s string, code int) {
 	buf := []byte(s)
 	rw.Header().Set("Content-Type", ContentTypeTextPlainUTF8)
 	rw.Header().Set("Content-Length", strconv.Itoa(len(buf)))

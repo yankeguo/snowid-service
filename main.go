@@ -3,121 +3,86 @@ package main
 import (
 	"context"
 	"github.com/guoyk93/snowid"
-	"github.com/guoyk93/summer"
+	"github.com/guoyk93/winter"
+	"github.com/guoyk93/winter/wboot"
 	"log"
-	"net/http"
-	"os"
-	"os/signal"
 	"strconv"
-	"strings"
-	"syscall"
 	"time"
 )
 
+const (
+	KeySnowIDGenerator = "snowid.Generator"
+)
+
 func main() {
-	var err error
-	defer func() {
-		if err == nil {
+	wboot.Main(func() (a winter.App, err error) {
+		var (
+			id uint64
+		)
+
+		if id, err = extractWorkerID(); err != nil {
 			return
 		}
-		log.Println("exited with error:", err.Error())
-		os.Exit(1)
-	}()
 
-	type Options struct {
-		Bind     string
-		Port     string
-		WorkerID string
-	}
+		log.Println("using worker id:", id)
 
-	var opts Options
+		a = winter.New(
+			winter.WithLivenessPath("/healthz"),
+			winter.WithReadinessPath("/healthz"),
+			winter.WithMetricsPath("/metrics"),
+		)
 
-	// detect bind
-	opts.Bind = strings.TrimSpace(os.Getenv("BIND"))
+		{
+			var idGen snowid.Generator
 
-	// detect port
-	if opts.Port = strings.TrimSpace(os.Getenv("PORT")); opts.Port == "" {
-		opts.Port = "8080"
-	}
-
-	// detect workerID
-	var workerID uint64
-
-	if opts.WorkerID = strings.TrimSpace(os.Getenv("WORKER_ID")); opts.WorkerID != "" {
-		if workerID, err = strconv.ParseUint(strings.TrimSpace(os.Getenv("WORKER_ID")), 10, 64); err != nil {
-			return
+			a.Component("snowid").
+				Startup(func(ctx context.Context) (err error) {
+					var workerID uint64
+					if workerID, err = extractWorkerID(); err != nil {
+						return
+					}
+					if idGen, err = snowid.New(snowid.Options{
+						Epoch: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+						ID:    workerID,
+					}); err != nil {
+						return
+					}
+					return
+				}).
+				Middleware(func(h winter.HandlerFunc) winter.HandlerFunc {
+					return func(ctx winter.Context) {
+						ctx.Inject(func(ctx context.Context) context.Context {
+							return context.WithValue(ctx, KeySnowIDGenerator, idGen)
+						})
+						h(ctx)
+					}
+				}).
+				Shutdown(func(ctx context.Context) (err error) {
+					idGen.Stop()
+					return
+				})
 		}
-	} else {
-		log.Println("guessing worker id from hostname")
-		if workerID, err = SequenceIDFromHostname(); err != nil {
-			return
-		}
-	}
 
-	log.Println("using worker id:", workerID)
+		a.HandleFunc("/", func(ctx winter.Context) {
+			idGen := ctx.Value(KeySnowIDGenerator).(snowid.Generator)
 
-	// create the instance
-	var idGen snowid.Generator
+			args := winter.Bind[struct {
+				Size int `json:"size,string"`
+			}](ctx)
 
-	if idGen, err = snowid.New(snowid.Options{
-		Epoch: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
-		ID:    workerID,
-	}); err != nil {
+			if args.Size < 1 {
+				args.Size = 1
+			}
+
+			var response []string
+			for i := 0; i < args.Size; i++ {
+				response = append(response, strconv.FormatUint(idGen.NewID(), 10))
+			}
+
+			ctx.JSON(response)
+		})
+
 		return
-	}
-
-	a := summer.Basic(
-		summer.WithLivenessPath("/healthz"),
-		summer.WithReadinessPath("/healthz"),
-		summer.WithMetricsPath("/metrics"),
-	)
-
-	a.HandleFunc("/", func(ctx summer.Context) {
-		args := summer.Bind[struct {
-			Size int `json:"size,string"`
-		}](ctx)
-
-		if args.Size < 1 {
-			args.Size = 1
-		}
-
-		var response []string
-		for i := 0; i < args.Size; i++ {
-			response = append(response, strconv.FormatUint(idGen.NewID(), 10))
-		}
-
-		ctx.JSON(response)
 	})
 
-	// create server
-	s := &http.Server{
-		Addr:    opts.Bind + ":" + opts.Port,
-		Handler: a,
-	}
-
-	log.Println("listening at:", s.Addr)
-
-	// guard
-	chErr := make(chan error, 1)
-	chSig := make(chan os.Signal, 1)
-	signal.Notify(chSig, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(chSig)
-
-	go func() {
-		chErr <- s.ListenAndServe()
-	}()
-
-	select {
-	case err = <-chErr:
-		return
-	case sig := <-chSig:
-		log.Println("signal caught:", sig.String())
-	}
-
-	time.Sleep(time.Second * 3)
-
-	err = s.Shutdown(context.Background())
-	<-chErr
-
-	return
 }
