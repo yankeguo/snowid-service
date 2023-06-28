@@ -9,6 +9,9 @@ a simple id generation service by snowid
 * `BIND`, address to bind, default to empty
 * `PORT`, port to listen, default to `8080`
 * `WORKER_ID`, unique worker id, if not set, will guess from hostname (compatible with Kubernetes StatefulSet)
+* `EPOCH`, epoch of snow id in UTC, default to `2020-01-01 00:00:00`
+* `GRAIN`, snow id grain, default to `1ms`, mimimum to `1ms`
+* `LEADING_BIT`, weather to set leading bit, default to `false`
 
 ### Invocation
 

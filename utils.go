@@ -23,7 +23,7 @@ func extractWorkerID() (id uint64, err error) {
 			return
 		}
 	} else {
-		log.Println("guessing worker id from hostname")
+		log.Println("Guessing WorkerID from hostname")
 		if id, err = sequenceIDFromHostname(); err != nil {
 			return
 		}
