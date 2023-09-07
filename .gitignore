@@ -19,4 +19,6 @@
 
 # Binary
 /snowid-service
+/build/
+/dist/
 
