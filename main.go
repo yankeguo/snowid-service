@@ -105,6 +105,8 @@ func installGenerator(g snowid.Generator, ur ufx.Router, pr ufx.Prober) {
 			response = append(response, strconv.FormatUint(g.NewID(), 10))
 		}
 
+		c.Header().Add("Expires", "0")
+		c.Header().Add("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate")
 		c.JSON(response)
 	})
 }
