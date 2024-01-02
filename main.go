@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/guoyk93/snowid"
-	"github.com/guoyk93/ufx"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/fx"
 	"log"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/yankeguo/snowid"
+	"github.com/yankeguo/ufx"
+	"go.uber.org/fx"
 )
 
 var (
