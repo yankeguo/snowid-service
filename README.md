@@ -1,5 +1,8 @@
 # snowid-service
 
+[![release](https://github.com/yankeguo/snowid-service/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/yankeguo/snowid-service/actions/workflows/release.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/yankeguo/snowid-service)](https://hub.docker.com/r/yankeguo/snowid-service)
+
 A simple id generation service by snowid
 
 ## Usage
@@ -39,10 +42,6 @@ GET /any/other/path?size=10
   "380651065730707465"
 ]
 ```
-
-## Donation
-
-View https://guoyk.xyz/donation
 
 ## Credits
 
